@@ -48,6 +48,37 @@ module ActiveRecord
           sql
         end
 
+        def add_column_options!(sql, options)
+          sql << " DEFAULT #{option_is_a_function?(options[:default]) ? options[:default] : quote_value(options[:default], options[:column])}" if options_include_default?(options)
+          # must explicitly check for :null to allow change_column to work on migrations
+          if options[:null] == false
+            sql << " NOT NULL"
+          elsif options[:column].sql_type == "timestamp"
+            sql << " NULL "
+          end
+          if options[:auto_increment] == true
+            sql << " AUTO_INCREMENT"
+          end
+          sql
+        end
+
+        def option_is_a_function?(option)
+          return false if option.blank? or
+                          option =~ /\(\w+\)$/ or
+                          !mysql_version_supports_function_defaults?
+
+          # append parenthesis to ensure function syntax.
+          _o = option.dup
+          _o += "()" unless _o =~ /\(\)$/
+          @conn.select_value("SELECT #{_o}").present?
+        rescue StandardError => e
+          return false
+        end
+
+        def mysql_version_supports_function_defaults?
+          @conn.send(:version).zip([5, 6, 5]).all? {|a| a[0]>= a[1]}
+        end
+
         def index_in_create(table_name, column_name, options)
           index_name, index_type, index_columns, index_options, index_algorithm, index_using = @conn.add_index_options(table_name, column_name, options)
           "#{index_type} INDEX #{quote_column_name(index_name)} #{index_using} (#{index_columns})#{index_options} #{index_algorithm}"
